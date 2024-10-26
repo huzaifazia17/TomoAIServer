@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const mongoose = require('mongoose'); // Import mongoose for MongoDB connection
+const mongoose = require('mongoose'); 
 require('dotenv').config(); // Load environment variables
 
 // Import LlamaAI dynamically for ESM compatibility
@@ -22,17 +22,37 @@ app.use(cors()); // Enable CORS for frontend-backend communication
 app.use(express.json()); // Parse incoming JSON requests
 
 // Connect to MongoDB
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('MongoDB connected'))
-  .catch((error) => console.error('MongoDB connection error:', error));
+mongoose.connect(process.env.MONGO_URI).then(() => console.log('MongoDB connected')).catch((error) => console.error('MongoDB connection error:', error));
 
 // Define User model
 const userSchema = new mongoose.Schema({
-  firebaseUid: { type: String, required: true, unique: true },
-  firstName: { type: String, required: true },
-  lastName: { type: String, required: true },
-  email: { type: String, required: true, unique: true },
-  role: { type: String, enum: ['student', 'ta', 'professor'], required: true },
+  firebaseUid: { 
+    type: String, 
+    required: true, 
+    unique: true 
+  },
+  
+  firstName: { 
+    type: String, 
+    required: true 
+  },
+
+  lastName: { 
+    type: String, 
+    required: true 
+  },
+
+  email: { 
+    type: String, 
+    required: true, 
+    unique: true 
+  },
+
+  role: { 
+    type: String, 
+    enum: ['student', 'ta', 'professor'], 
+    required: true 
+  },
 }, { timestamps: true });
 
 const User = mongoose.model('User', userSchema);
