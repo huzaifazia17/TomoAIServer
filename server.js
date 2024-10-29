@@ -3,7 +3,6 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 require('dotenv').config(); // Load environment variables
 
-//Test comment
 // Import LlamaAI dynamically for ESM compatibility
 let LlamaAI;
 (async () => {
@@ -16,14 +15,16 @@ let LlamaAI;
 })();
 
 const app = express();
-const port = 3001; // Define your port
+const port = 3009; // Define your port
 
 // Middleware setup
 app.use(cors()); // Enable CORS for frontend-backend communication
 app.use(express.json()); // Parse incoming JSON requests
 
 // Connect to MongoDB
-mongoose.connect(process.env.MONGO_URI).then(() => console.log('MongoDB connected')).catch((error) => console.error('MongoDB connection error:', error));
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log('MongoDB connected'))
+  .catch((error) => console.error('MongoDB connection error:', error));
 
 // Define User model
 const userSchema = new mongoose.Schema({
@@ -32,23 +33,19 @@ const userSchema = new mongoose.Schema({
     required: true,
     unique: true
   },
-
   firstName: {
     type: String,
     required: true
   },
-
   lastName: {
     type: String,
     required: true
   },
-
   email: {
     type: String,
     required: true,
     unique: true
   },
-
   role: {
     type: String,
     enum: ['student', 'ta', 'professor'],
@@ -58,42 +55,36 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema);
 
-// POST route for chatbot
+// POST route for chatbot using LlamaAI package
 app.post('/api/chat', async (req, res) => {
   try {
-    const { prompt } = req.body; // Get the user prompt from the request body
+    const { prompt } = req.body;
 
-    // Ensure the prompt is provided
     if (!prompt) {
       return res.status(400).json({ error: "Prompt is required" });
     }
 
-    // Initialize the LlamaAI instance with your API key
-    const llamaAPI = new LlamaAI(process.env.LLAMA_API_KEY);
+    const apiKey = process.env.LLAMA_API_KEY;
+    if (!apiKey) {
+      console.error("No API key found in environment variables.");
+      return res.status(500).json({ error: "No API key found" });
+    }
 
-    // Create the API request payload
+    // Initialize the LlamaAI instance with your API key
+    const llamaAPI = new LlamaAI(apiKey);
     const apiRequestJson = {
-      messages: [{ role: 'user', content: prompt }], // The user's message
-      stream: false, // Disable streaming of responses
+      model: 'llama3.2-3b', // Replace with the correct model ID
+      messages: [{ role: 'user', content: prompt }]
     };
 
-    // Log the API request body for debugging purposes
     console.log("Sending request to LLaMA API:", JSON.stringify(apiRequestJson, null, 2));
-
-    // Send the request to the LLaMA model
     const response = await llamaAPI.run(apiRequestJson);
+    const messageContent = response?.choices?.[0]?.message?.content || "No response from AI";
 
-    // Check if the response is valid and contains a message
-    const messageContent = response.choices[0]?.message?.content || "No response from AI";
-
-    // Log the full API response
-    console.log("API Response:", JSON.stringify(response, null, 2));
-
-    // Return the AI response to the client
     res.json({ message: messageContent });
   } catch (error) {
-    console.error("Error in AI request:", error.message || error);
-    res.status(500).json({ error: 'Failed to process request' });
+    console.error("Error in AI request:", error); // Log the complete error object
+    res.status(500).json({ error: 'Internal server error', details: error.message, stack: error.stack });
   }
 });
 
@@ -122,6 +113,28 @@ app.post('/api/users', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+// GET route to retrieve user role based on firebaseUid
+app.get('/api/users/:firebaseUid', async (req, res) => {
+  try {
+    const { firebaseUid } = req.params;
+    console.log("Fetching user with firebaseUid:", firebaseUid); // Log the firebaseUid being searched
+
+    const user = await User.findOne({ firebaseUid });
+    if (!user) {
+      console.log("User not found with firebaseUid:", firebaseUid);
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    console.log("User found:", user); // Log the found user document
+    res.json({ role: user.role });
+  } catch (error) {
+    console.error("Error retrieving user:", error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
 
 // Start the Express server
 app.listen(port, () => {
