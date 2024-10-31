@@ -3,6 +3,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 require('dotenv').config(); // Load environment variables
 
+
 // Import LlamaAI dynamically for ESM compatibility
 let LlamaAI;
 (async () => {
@@ -113,6 +114,31 @@ app.post('/api/users', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+// GET route to retrieve all users or just the current user's role
+app.get('/api/users', async (req, res) => {
+  try {
+    const { roleOnly } = req.query;
+
+    // If roleOnly is true, return the current user's role only
+    if (roleOnly === 'true') {
+      const user = await User.findOne({ firebaseUid: req.user.uid }); // Assumes req.user.uid is set by authentication middleware
+      if (!user) {
+        console.log("User not found with firebaseUid:", req.user.uid);
+        return res.status(404).json({ message: 'User not found' });
+      }
+      console.log("User role fetched:", user.role);
+      return res.json({ role: user.role });
+    }
+
+    // Otherwise, return all users
+    const users = await User.find({});
+    res.json(users);
+  } catch (error) {
+    console.error("Error fetching users:", error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 
 // GET route to retrieve user role based on firebaseUid
 app.get('/api/users/:firebaseUid', async (req, res) => {
