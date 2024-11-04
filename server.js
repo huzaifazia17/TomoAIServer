@@ -1,19 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
+const OpenAI = require('openai');
 require('dotenv').config(); // Load environment variables
-
-
-// Import LlamaAI dynamically for ESM compatibility
-let LlamaAI;
-(async () => {
-  try {
-    LlamaAI = (await import('llamaai')).default;
-  } catch (error) {
-    console.error("Error loading LlamaAI module:", error);
-    process.exit(1); // Exit if LlamaAI can't be loaded
-  }
-})();
 
 const app = express();
 const port = 3009; // Define your port
@@ -54,9 +43,85 @@ const userSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
-const User = mongoose.model('User', userSchema);
+// Define Space Schema
+const spaceSchema = new mongoose.Schema({
+  firebaseUid: {
+    type: String,
+    required: true,
+    unique: true,
+  },
+  spaceId: {
+    type: String,
+    required: true,
+    unique: true,
+  },
+  spaceName: {
+    type: String,
+    required: true,
+  },
+  users: {
+    type: [String], // Array of firebaseUid strings
+    required: true,
+    default: [], // Initialize with an empty array
+  },
+}, {
+  timestamps: true,
+});
 
-// POST route for chatbot using LlamaAI package
+// Define Chat Schema
+const chatSchema = new mongoose.Schema({
+  spaceId: {
+    type: String,
+    required: true,
+    unique: true,
+  },
+  chatId: {
+    type: String,
+    required: true,
+    unique: true,
+  },
+  chatName: {
+    type: String,
+    required: true,
+  },
+
+}, {
+  timestamps: true,
+});
+
+// Define the Embedding Schema
+const embeddingSchema = new mongoose.Schema({
+  spaceId: {
+    type: String,
+    required: true, // Associates the embeddings with a specific space
+  },
+  title: {
+    type: String,
+    required: true, // The name of the document
+  },
+  embeddings: {
+    type: [Number], // Array of numbers representing the vector embeddings
+    required: true,
+  },
+  uploadedBy: {
+    type: String, // The firebaseUid of the user who uploaded the document
+    required: true,
+  },
+}, {
+  timestamps: true,
+});
+
+// Initiliaze DB Schemas
+const User = mongoose.model('User', userSchema);
+const Chat = mongoose.model('Chat', chatSchema);
+const Space = mongoose.model('Space', spaceSchema);
+const Embedding = mongoose.model('Embedding', embeddingSchema);
+// Initialize OpenAI API client
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+// POST route for chatbot using OpenAI API
 app.post('/api/chat', async (req, res) => {
   try {
     const { prompt } = req.body;
@@ -65,22 +130,13 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: "Prompt is required" });
     }
 
-    const apiKey = process.env.LLAMA_API_KEY;
-    if (!apiKey) {
-      console.error("No API key found in environment variables.");
-      return res.status(500).json({ error: "No API key found" });
-    }
+    // Send request to OpenAI API
+    const response = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo', // Replace with your desired model
+      messages: [{ role: 'user', content: prompt }],
+    });
 
-    // Initialize the LlamaAI instance with your API key
-    const llamaAPI = new LlamaAI(apiKey);
-    const apiRequestJson = {
-      model: 'llama3.2-3b', // Replace with the correct model ID
-      messages: [{ role: 'user', content: prompt }]
-    };
-
-    console.log("Sending request to LLaMA API:", JSON.stringify(apiRequestJson, null, 2));
-    const response = await llamaAPI.run(apiRequestJson);
-    const messageContent = response?.choices?.[0]?.message?.content || "No response from AI";
+    const messageContent = response.choices[0].message.content || "No response from AI";
 
     res.json({ message: messageContent });
   } catch (error) {
@@ -114,6 +170,7 @@ app.post('/api/users', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 // GET route to retrieve all users or just the current user's role
 app.get('/api/users', async (req, res) => {
   try {
@@ -139,7 +196,6 @@ app.get('/api/users', async (req, res) => {
   }
 });
 
-
 // GET route to retrieve user role based on firebaseUid
 app.get('/api/users/:firebaseUid', async (req, res) => {
   try {
@@ -159,8 +215,6 @@ app.get('/api/users/:firebaseUid', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
-
-
 
 // Start the Express server
 app.listen(port, () => {

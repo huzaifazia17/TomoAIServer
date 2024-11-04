@@ -17,6 +17,7 @@
     "express": "^4.21.1",
     "llamaai": "^1.0.4",
     "mongoose": "^8.7.3",
+    "openai": "^4.70.2",
     "server": "file:"
   },
   "devDependencies": {
