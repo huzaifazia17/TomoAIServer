@@ -4,7 +4,6 @@ const spaceSchema = new mongoose.Schema({
     firebaseUid: {
         type: String,
         required: true,
-        unique: true,
     },
     spaceId: {
         type: String,

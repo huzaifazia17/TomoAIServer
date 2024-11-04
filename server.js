@@ -48,7 +48,6 @@ const spaceSchema = new mongoose.Schema({
   firebaseUid: {
     type: String,
     required: true,
-    unique: true,
   },
   spaceId: {
     type: String,
@@ -116,6 +115,33 @@ const User = mongoose.model('User', userSchema);
 const Chat = mongoose.model('Chat', chatSchema);
 const Space = mongoose.model('Space', spaceSchema);
 const Embedding = mongoose.model('Embedding', embeddingSchema);
+
+// Function to create the default space
+const createDefaultSpace = async (firebaseUid) => {
+  try {
+    // Check if the "Personal Assistant" space already exists for the user
+    const existingSpace = await Space.findOne({ firebaseUid, spaceName: "Personal Assistant" });
+    if (existingSpace) {
+      return; // Default space already exists, so no need to create it
+    }
+
+    // Create the default "Personal Assistant" space
+    const defaultSpace = new Space({
+      firebaseUid,
+      spaceId: `personal-assistant-${firebaseUid}`, // Use a unique spaceId for this space
+      spaceName: "Personal Assistant",
+      users: [firebaseUid], // Add the user to the space's users list
+    });
+
+    await defaultSpace.save();
+    console.log("Default 'Personal Assistant' space created successfully");
+  } catch (error) {
+    console.error("Error creating default space:", error);
+  }
+};
+
+
+
 // Initialize OpenAI API client
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -171,6 +197,48 @@ app.post('/api/users', async (req, res) => {
   }
 });
 
+// POST route to create a new space
+app.post('/api/spaces', async (req, res) => {
+  try {
+    const { firebaseUid, spaceId, spaceName, users } = req.body;
+
+    // Check if a space with the same spaceId already exists
+    const existingSpace = await Space.findOne({ firebaseUid, spaceId });
+    if (existingSpace) {
+      return res.status(400).json({ message: 'Space already exists' });
+    }
+
+    // Create a new space document
+    const newSpace = new Space({
+      firebaseUid,
+      spaceId,
+      spaceName,
+      users,
+    });
+
+    await newSpace.save();
+    res.status(201).json({ message: 'Space created successfully', space: newSpace });
+  } catch (error) {
+    console.error('Error creating space:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
+
+// Example: Call this function when a user logs in
+app.post('/api/user/login', async (req, res) => {
+  const { firebaseUid } = req.body;
+
+  // Ensure the user is authenticated
+  // (Add your authentication logic here)
+
+  // Create the default space if it doesn't exist
+  await createDefaultSpace(firebaseUid);
+
+  res.status(200).json({ message: 'User logged in successfully' });
+});
+
 // GET route to retrieve all users or just the current user's role
 app.get('/api/users', async (req, res) => {
   try {
@@ -215,6 +283,69 @@ app.get('/api/users/:firebaseUid', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+// GET route to fetch spaces for a specific user
+app.get('/api/spaces', async (req, res) => {
+  try {
+    const { firebaseUid } = req.query;
+    if (!firebaseUid) {
+      return res.status(400).json({ message: 'firebaseUid is required' });
+    }
+
+    // Fetch all spaces for the user
+    const spaces = await Space.find({ firebaseUid });
+    res.status(200).json({ spaces });
+  } catch (error) {
+    console.error('Error fetching spaces:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
+
+// PUT route for updating a space name
+app.put('/api/spaces/:spaceId', async (req, res) => {
+  try {
+    const { spaceId } = req.params;
+    const { spaceName } = req.body;
+
+    // Update the space name in the database
+    const updatedSpace = await Space.findOneAndUpdate({ spaceId }, { spaceName }, { new: true });
+
+    if (!updatedSpace) {
+      return res.status(404).json({ message: 'Space not found' });
+    }
+
+    res.status(200).json({ message: 'Space name updated successfully' });
+  } catch (error) {
+    console.error('Error updating space name:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// DELETE route to delete a space
+app.delete('/api/spaces/:spaceId', async (req, res) => {
+  try {
+    const { spaceId } = req.params;
+
+    // Delete the space from the database
+    const result = await Space.findOneAndDelete({ spaceId });
+    if (!result) {
+      return res.status(404).json({ message: 'Space not found' });
+    }
+
+    res.status(200).json({ message: 'Space deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting space:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
+
+
+
+
 
 // Start the Express server
 app.listen(port, () => {
