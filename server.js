@@ -292,11 +292,31 @@ app.get('/api/spaces', async (req, res) => {
       return res.status(400).json({ message: 'firebaseUid is required' });
     }
 
-    // Fetch all spaces for the user
-    const spaces = await Space.find({ firebaseUid });
+    // Fetch all spaces where the users array includes the current user's firebaseUid
+    const spaces = await Space.find({ users: firebaseUid });
+
+    // Return the spaces as an array in an object
     res.status(200).json({ spaces });
   } catch (error) {
     console.error('Error fetching spaces:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
+// GET route to fetch a specific space by spaceId
+app.get('/api/spaces/:spaceId', async (req, res) => {
+  try {
+    const { spaceId } = req.params;
+    const space = await Space.findOne({ spaceId });
+
+    if (!space) {
+      return res.status(404).json({ message: 'Space not found' });
+    }
+
+    res.status(200).json(space);
+  } catch (error) {
+    console.error('Error fetching space:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -322,6 +342,87 @@ app.put('/api/spaces/:spaceId', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+/* // PUT route to add users to a space
+app.put('/api/spaces/:spaceId/users', async (req, res) => {
+  try {
+    const { spaceId } = req.params;
+    const { users } = req.body;
+
+    if (!Array.isArray(users) || users.length === 0) {
+      return res.status(400).json({ message: 'Invalid or empty users array' });
+    }
+
+    const space = await Space.findOneAndUpdate(
+      { spaceId },
+      { $addToSet: { users: { $each: users } } }, // Use $addToSet to add users without duplicates
+      { new: true }
+    );
+
+    if (!space) {
+      return res.status(404).json({ message: 'Space not found' });
+    }
+
+    res.status(200).json(space);
+  } catch (error) {
+    console.error('Error adding users to space:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+}); */
+app.put('/api/spaces/:spaceId/users', async (req, res) => {
+  try {
+    const { spaceId } = req.params;
+    const { userId } = req.body; // Make sure this is named `userId` to match what you send from the frontend
+
+    if (!userId) {
+      return res.status(400).json({ message: 'User ID is required' });
+    }
+
+    // Update the space to add the userId (firebaseUid) to the users array
+    const space = await Space.findOneAndUpdate(
+      { spaceId },
+      { $addToSet: { users: userId } }, // $addToSet ensures no duplicates
+      { new: true }
+    );
+
+    if (!space) {
+      return res.status(404).json({ message: 'Space not found' });
+    }
+
+    res.status(200).json(space);
+  } catch (error) {
+    console.error('Error adding user to space:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
+
+
+
+// DELETE route to remove a user from a space
+app.delete('/api/spaces/:spaceId/users/:userId', async (req, res) => {
+  try {
+    const { spaceId, userId } = req.params;
+
+    const space = await Space.findOneAndUpdate(
+      { spaceId },
+      { $pull: { users: userId } }, // Remove userId from the array
+      { new: true }
+    );
+
+    if (!space) {
+      return res.status(404).json({ message: 'Space not found' });
+    }
+
+    res.status(200).json(space);
+  } catch (error) {
+    console.error('Error removing user from space:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
+
 
 // DELETE route to delete a space
 app.delete('/api/spaces/:spaceId', async (req, res) => {
