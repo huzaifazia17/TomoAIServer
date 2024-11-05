@@ -69,10 +69,13 @@ const spaceSchema = new mongoose.Schema({
 
 // Define Chat Schema
 const chatSchema = new mongoose.Schema({
+  firebaseUid: {
+    type: String,
+    required: true,
+  },
   spaceId: {
     type: String,
     required: true,
-    unique: true,
   },
   chatId: {
     type: String,
@@ -83,7 +86,6 @@ const chatSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
-
 }, {
   timestamps: true,
 });
@@ -443,10 +445,90 @@ app.delete('/api/spaces/:spaceId', async (req, res) => {
 });
 
 
+app.post('/api/chats', async (req, res) => {
+  try {
+    const { firebaseUid, spaceId, chatId, chatName } = req.body;
+
+    // Validate required fields
+    if (!firebaseUid || !spaceId || !chatId || !chatName) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
+
+    // Create a new chat
+    const newChat = new Chat({ firebaseUid, spaceId, chatId, chatName });
+    await newChat.save();
+
+    res.status(201).json(newChat);
+  } catch (error) {
+    console.error('Error creating chat:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
 
+app.get('/api/chats', async (req, res) => {
+  try {
+    const { firebaseUid, spaceId } = req.query;
 
+    if (!firebaseUid || !spaceId) {
+      return res.status(400).json({ message: 'firebaseUid and spaceId are required' });
+    }
 
+    // Fetch chats for the space and user
+    const chats = await Chat.find({ firebaseUid, spaceId });
+
+    res.status(200).json({ chats });
+  } catch (error) {
+    console.error('Error fetching chats:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+app.delete('/api/chats/:chatId', async (req, res) => {
+  try {
+    const { chatId } = req.params;
+
+    // Find and delete the chat by chatId
+    const deletedChat = await Chat.findOneAndDelete({ chatId });
+
+    if (!deletedChat) {
+      return res.status(404).json({ message: 'Chat not found' });
+    }
+
+    res.status(200).json({ message: 'Chat deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting chat:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Server.js or your main server file
+app.put('/api/chats/:chatId', async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { chatName } = req.body;
+
+    if (!chatName) {
+      return res.status(400).json({ message: 'Chat name is required' });
+    }
+
+    // Update the chat in the database
+    const updatedChat = await Chat.findOneAndUpdate(
+      { chatId }, // Find the chat by its unique chatId
+      { chatName }, // Update the chat name
+      { new: true } // Return the updated document
+    );
+
+    if (!updatedChat) {
+      return res.status(404).json({ message: 'Chat not found' });
+    }
+
+    res.status(200).json(updatedChat);
+  } catch (error) {
+    console.error('Error updating chat name:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
 // Start the Express server
 app.listen(port, () => {

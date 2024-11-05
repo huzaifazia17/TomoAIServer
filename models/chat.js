@@ -1,10 +1,13 @@
 import mongoose from 'mongoose';
 
 const chatSchema = new mongoose.Schema({
+    firebaseUid: {
+        type: String,
+        required: true,
+    },
     spaceId: {
         type: String,
         required: true,
-        unique: true,
     },
     chatId: {
         type: String,
@@ -15,7 +18,6 @@ const chatSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
-
 }, {
     timestamps: true,
 });
