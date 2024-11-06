@@ -13,10 +13,6 @@ const embeddingSchema = new mongoose.Schema({
         type: [Number], // Array of numbers representing the vector embeddings
         required: true,
     },
-    uploadedBy: {
-        type: String, // The firebaseUid of the user who uploaded the document
-        required: true,
-    },
 }, {
     timestamps: true,
 });

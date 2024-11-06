@@ -2,10 +2,18 @@ const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const OpenAI = require('openai');
+const pdfParse = require('pdf-parse');
+const fs = require('fs');
+const multer = require('multer');
+const fetch = require('node-fetch'); // To make API calls
 require('dotenv').config(); // Load environment variables
+
 
 const app = express();
 const port = 3009; // Define your port
+
+// Configure file upload using multer
+const upload = multer({ dest: 'uploads/' });
 
 // Middleware setup
 app.use(cors()); // Enable CORS for frontend-backend communication
@@ -102,10 +110,6 @@ const embeddingSchema = new mongoose.Schema({
   },
   embeddings: {
     type: [Number], // Array of numbers representing the vector embeddings
-    required: true,
-  },
-  uploadedBy: {
-    type: String, // The firebaseUid of the user who uploaded the document
     required: true,
   },
 }, {
@@ -529,6 +533,129 @@ app.put('/api/chats/:chatId', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+
+// Endpoint to generate embeddings and save to the database
+app.post('/api/embeddings', async (req, res) => {
+  try {
+    const { spaceId, title, text } = req.body;
+
+    if (!spaceId || !title || !text) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
+
+    // Generate embeddings using OpenAI API
+    const response = await openai.createEmbedding({
+      model: 'text-embedding-3-small', // test model
+      input: text,
+    });
+
+    const embeddings = response.data.data[0].embedding;
+
+    // Save the embeddings to the database
+    const newEmbedding = new Embedding({ spaceId, title, embeddings });
+    await newEmbedding.save();
+
+    res.status(201).json({ id: newEmbedding._id });
+  } catch (error) {
+    console.error('Error generating embeddings:', error);
+    res.status(500).json({ message: 'Failed to generate embeddings' });
+  }
+});
+
+// Endpoint to fetch documents for a specific space
+app.get('/api/documents', async (req, res) => {
+  try {
+    const { spaceId } = req.query;
+    if (!spaceId) {
+      return res.status(400).json({ message: 'spaceId is required' });
+    }
+
+    // Fetch documents associated with the given spaceId
+    const documents = await Embedding.find({ spaceId });
+    res.status(200).json({ documents });
+  } catch (error) {
+    console.error('Error fetching documents:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Endpoint to delete a document by ID
+app.delete('/api/documents/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const document = await Embedding.findByIdAndDelete(id);
+
+    if (!document) {
+      return res.status(404).json({ message: 'Document not found' });
+    }
+
+    res.status(200).json({ message: 'Document deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting document:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Endpoint to upload and process PDF
+app.post('/api/upload-pdf', upload.single('pdf'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
+
+    const { spaceId, title } = req.body;
+    if (!spaceId || !title) {
+      return res.status(400).json({ message: 'spaceId and title are required' });
+    }
+
+    // Read the PDF file
+    const pdfBuffer = fs.readFileSync(req.file.path);
+    const pdfData = await pdfParse(pdfBuffer);
+    const textContent = pdfData.text;
+    console.log('Extracted text from PDF:', textContent);
+
+    // Make an API call to OpenAI to get embeddings
+    const response = await fetch('https://api.openai.com/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'text-embedding-ada-002',
+        input: textContent,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to generate embeddings');
+    }
+
+    const data = await response.json();
+    const embeddings = data.data[0].embedding;
+
+    // Save embeddings to the database
+    const newEmbedding = new Embedding({
+      spaceId,
+      title,
+      embeddings,
+    });
+    const savedDocument = await newEmbedding.save();
+    console.log('Document saved to database:', savedDocument);
+
+    // Delete the temporary file
+    fs.unlinkSync(req.file.path);
+
+    // Return the saved document as the response
+    res.status(200).json(savedDocument);
+  } catch (error) {
+    console.error('Error processing the PDF:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
 
 // Start the Express server
 app.listen(port, () => {
