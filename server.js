@@ -1,13 +1,20 @@
-const express = require('express');
-const cors = require('cors');
-const mongoose = require('mongoose');
-const OpenAI = require('openai');
-const pdfParse = require('pdf-parse');
-const fs = require('fs');
-const multer = require('multer');
-const fetch = require('node-fetch'); // To make API calls
-require('dotenv').config(); // Load environment variables
+import express from 'express';
+import cors from 'cors';
+import mongoose from 'mongoose';
+import OpenAI from 'openai';
+import fs from 'fs';
+import multer from 'multer';
+import fetch from 'node-fetch';
+import { OpenAIEmbeddings } from '@langchain/openai';
+import { HNSWLib } from '@langchain/community/vectorstores/hnswlib';
+import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
+import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
+import { MemoryVectorStore } from "langchain/vectorstores/memory";
+import { RunnableSequence, RunnablePassthrough } from "@langchain/core/runnables";
+import { Document } from "langchain/document";
+import * as dotenv from 'dotenv';
 
+dotenv.config();
 
 const app = express();
 const port = 3009; // Define your port
@@ -147,35 +154,93 @@ const createDefaultSpace = async (firebaseUid) => {
 };
 
 
-
 // Initialize OpenAI API client
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// POST route for chatbot using OpenAI API
+
 app.post('/api/chat', async (req, res) => {
   try {
-    const { prompt } = req.body;
+    const { prompt, spaceId } = req.body;
 
-    if (!prompt) {
-      return res.status(400).json({ error: "Prompt is required" });
+    if (!prompt || !spaceId) {
+      return res.status(400).json({ error: "Prompt and spaceId are required" });
     }
 
-    // Send request to OpenAI API
+    console.log("Received prompt:", prompt);
+    console.log("Received spaceId:", spaceId);
+
+    // Fetch stored embeddings for the specified spaceId
+    const embeddingsData = await Embedding.find({ spaceId });
+    if (!embeddingsData || embeddingsData.length === 0) {
+      console.error("No embeddings found for spaceId:", spaceId);
+      return res.status(404).json({ error: "No embeddings found for the specified space" });
+    }
+    console.log("Fetched embeddings for space:", embeddingsData.length);
+
+    // Initialize OpenAI embeddings client
+    const embeddingsClient = new OpenAIEmbeddings({ apiKey: process.env.OPENAI_API_KEY });
+
+    // Convert documents to LangChain Document format with pageContent as title
+    const documents = embeddingsData.map((doc) => new Document({
+      pageContent: String(doc.title || "No content available"),
+      metadata: { spaceId: doc.spaceId }
+    }));
+
+    // Create a vector store and add the documents to it
+    const vectorStore = new MemoryVectorStore(embeddingsClient);
+    await vectorStore.addDocuments(documents);
+
+    // Use similarity search on the vectorStore to find the top 3 similar documents
+    let results;
+    try {
+      results = await vectorStore.similaritySearch(String(prompt), 3);
+      console.log("Similarity search results:", results);
+    } catch (error) {
+      console.error("Error during similarity search:", error);
+      return res.status(500).json({ error: "Error during similarity search", details: error.message });
+    }
+
+    // Construct context from top matching documents
+    const context = results.map(result => `Document: ${result.pageContent}`).join('\n\n');
+    console.log("Constructed context for OpenAI:", context);
+
+    // Send the query with context to OpenAI
     const response = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo', // Replace with your desired model
-      messages: [{ role: 'user', content: prompt }],
+      model: 'gpt-3.5-turbo',
+      messages: [
+        { role: 'system', content: 'You are a helpful assistant that can answer questions about documents.' },
+        { role: 'user', content: `Context:\n${context}\n\nQuestion: ${prompt}` },
+      ],
     });
 
-    const messageContent = response.choices[0].message.content || "No response from AI";
-
-    res.json({ message: messageContent });
+    const aiResponse = response.choices[0].message.content || "No response from AI";
+    res.json({ message: aiResponse });
   } catch (error) {
-    console.error("Error in AI request:", error); // Log the complete error object
-    res.status(500).json({ error: 'Internal server error', details: error.message, stack: error.stack });
+    console.error("Error in AI request:", error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // POST route for user registration
 app.post('/api/users', async (req, res) => {
@@ -597,9 +662,10 @@ app.delete('/api/documents/:id', async (req, res) => {
   }
 });
 
-// Endpoint to upload and process PDF
 app.post('/api/upload-pdf', upload.single('pdf'), async (req, res) => {
   try {
+    console.log("Received PDF upload request");
+
     if (!req.file) {
       return res.status(400).json({ message: 'No file uploaded' });
     }
@@ -609,51 +675,45 @@ app.post('/api/upload-pdf', upload.single('pdf'), async (req, res) => {
       return res.status(400).json({ message: 'spaceId and title are required' });
     }
 
-    // Read the PDF file
-    const pdfBuffer = fs.readFileSync(req.file.path);
-    const pdfData = await pdfParse(pdfBuffer);
-    const textContent = pdfData.text;
-    console.log('Extracted text from PDF:', textContent);
+    // Load and split PDF document
+    const pdfLoader = new PDFLoader(req.file.path);
+    const pdfDocument = await pdfLoader.load();
+    const splitter = new RecursiveCharacterTextSplitter({ chunkSize: 1000, chunkOverlap: 200 });
+    const documentChunks = await splitter.splitDocuments(pdfDocument);
 
-    // Make an API call to OpenAI to get embeddings
-    const response = await fetch('https://api.openai.com/v1/embeddings', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'text-embedding-ada-002',
-        input: textContent,
-      }),
-    });
+    console.log("Document successfully split into chunks:", documentChunks.length);
 
-    if (!response.ok) {
-      throw new Error('Failed to generate embeddings');
+    // Initialize OpenAI Embeddings and ensure valid chunks
+    const embeddings = new OpenAIEmbeddings({ apiKey: process.env.OPENAI_API_KEY });
+    const validChunks = documentChunks.filter(chunk => chunk.pageContent?.trim());
+
+    if (validChunks.length === 0) {
+      return res.status(400).json({ message: 'No valid content found in the PDF to embed.' });
     }
 
-    const data = await response.json();
-    const embeddings = data.data[0].embedding;
+    console.log("Filtered and prepared valid document chunks:", validChunks.length);
 
-    // Save embeddings to the database
-    const newEmbedding = new Embedding({
+    // Generate embeddings for valid chunks
+    const hnswIndex = await HNSWLib.fromDocuments(validChunks, embeddings);
+
+    // Save embeddings index and document metadata to database
+    const newDocument = new Embedding({
       spaceId,
       title,
-      embeddings,
+      hnswIndex, // Storing the index
     });
-    const savedDocument = await newEmbedding.save();
-    console.log('Document saved to database:', savedDocument);
-
-    // Delete the temporary file
+    await newDocument.save();
     fs.unlinkSync(req.file.path);
 
-    // Return the saved document as the response
-    res.status(200).json(savedDocument);
+    console.log("Document successfully saved to database:", newDocument._id);
+    res.status(200).json(newDocument);
   } catch (error) {
     console.error('Error processing the PDF:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', details: error.message });
   }
 });
+
+
 
 
 
