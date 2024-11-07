@@ -198,28 +198,66 @@ app.post('/api/chat', async (req, res) => {
     const vectorStore = new MemoryVectorStore(embeddingsClient);
     await vectorStore.addDocuments(documents);
 
-    // Use similarity search on the vectorStore to find the top 3 similar documents
+    // Try similarity search to check for relevant document content
     let results;
+    let isDocumentBased = false;
     try {
       results = await vectorStore.similaritySearch(prompt, 3);
       console.log("Similarity search results:", results);
+
+      // Set a threshold score to determine if the prompt matches document content
+      //Higher threshold (>0.8) =>This will filter out responses that aren’t very closely matched to the document 
+      //content, meaning only very relevant document-related content will be included as context.
+      // Lower threshold (<0.5) =>This allows a broader range of content to match the query, 
+      // so the AI may use even loosely related document content as context.
+      const thresholdScore = 0.75; // Adjust as needed for relevance
+      isDocumentBased = results.some(result => result.score >= thresholdScore);
     } catch (error) {
       console.error("Error during similarity search:", error);
       return res.status(500).json({ error: "Error during similarity search", details: error.message });
     }
 
-    // Construct context from top matching documents' content
-    const context = results.map(result => `Content: ${result.pageContent}`).join('\n\n');
+    // Construct context from top matching documents' content if document-based
+    const context = isDocumentBased
+      ? results.map(result => `Content: ${result.pageContent}`).join('\n\n')
+      : "";
+
     console.log("Constructed context for OpenAI:", context);
 
-    // Send the query with context to OpenAI
+    // Send the query with or without context to OpenAI
     const response = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages: [
-        { role: 'system', content: 'You are a helpful assistant that can answer questions based on documents.' },
-        { role: 'user', content: `Context:\n${context}\n\nQuestion: ${prompt}` },
+        { role: 'system', content: 'You are a helpful assistant that can answer questions based on documents or provide general assistance.' },
+        { role: 'user', content: context ? `Context:\n${context}\n\nQuestion: ${prompt}` : prompt },
       ],
     });
+
+    // Working on a better format
+    /*     const response = await openai.chat.completions.create({
+          model: 'gpt-3.5-turbo',
+          messages: [
+            { 
+              role: 'system', 
+              content: 'You are a helpful assistant that can answer questions based on documents or provide general assistance and provide answers in a clear and structured format, with line breaks, bullet points, and numbered lists where appropriate. Use headings and organize information for easy readability.' 
+            },
+            { 
+              role: 'user', 
+              content: context 
+                ? `Please answer the question in a structured format with sections, bullet points, and line breaks as needed:
+                
+                **Context**:
+                ${context}
+                
+                **Question**:
+                ${prompt}`
+                : `Please answer the question clearly, using bullet points or line breaks as needed:
+                
+                ${prompt}`
+            },
+          ],
+        }); */
+
 
     const aiResponse = response.choices[0].message.content || "No response from AI";
     res.json({ message: aiResponse });
@@ -228,6 +266,7 @@ app.post('/api/chat', async (req, res) => {
     res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
+
 
 
 // POST route for user registration
