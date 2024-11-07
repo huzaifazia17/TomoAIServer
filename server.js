@@ -12,6 +12,8 @@ import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
 import { MemoryVectorStore } from "langchain/vectorstores/memory";
 import { RunnableSequence, RunnablePassthrough } from "@langchain/core/runnables";
 import { Document } from "langchain/document";
+import crypto from 'crypto';
+
 import * as dotenv from 'dotenv';
 
 dotenv.config();
@@ -105,23 +107,27 @@ const chatSchema = new mongoose.Schema({
   timestamps: true,
 });
 
-// Define the Embedding Schema
 const embeddingSchema = new mongoose.Schema({
   spaceId: {
     type: String,
-    required: true, // Associates the embeddings with a specific space
+    required: true,
   },
   title: {
     type: String,
-    required: true, // The name of the document
+    required: true,
   },
   embeddings: {
-    type: [Number], // Array of numbers representing the vector embeddings
+    type: [[Number]], // 2D array where each sub-array represents the embeddings for a chunk
+    required: true,
+  },
+  content: {
+    type: [String], // Array of content chunks, aligned with embeddings
     required: true,
   },
 }, {
   timestamps: true,
 });
+
 
 // Initiliaze DB Schemas
 const User = mongoose.model('User', userSchema);
@@ -171,21 +177,21 @@ app.post('/api/chat', async (req, res) => {
     console.log("Received prompt:", prompt);
     console.log("Received spaceId:", spaceId);
 
-    // Fetch stored embeddings for the specified spaceId
-    const embeddingsData = await Embedding.find({ spaceId });
-    if (!embeddingsData || embeddingsData.length === 0) {
+    // Fetch stored embeddings and content for the specified spaceId
+    const embeddingsData = await Embedding.findOne({ spaceId });
+    if (!embeddingsData || embeddingsData.embeddings.length === 0) {
       console.error("No embeddings found for spaceId:", spaceId);
       return res.status(404).json({ error: "No embeddings found for the specified space" });
     }
-    console.log("Fetched embeddings for space:", embeddingsData.length);
+    console.log("Fetched embeddings for space:", embeddingsData.embeddings.length);
 
     // Initialize OpenAI embeddings client
     const embeddingsClient = new OpenAIEmbeddings({ apiKey: process.env.OPENAI_API_KEY });
 
-    // Convert documents to LangChain Document format with pageContent as title
-    const documents = embeddingsData.map((doc) => new Document({
-      pageContent: String(doc.title || "No content available"),
-      metadata: { spaceId: doc.spaceId }
+    // Convert stored embeddings and content to LangChain Document format
+    const documents = embeddingsData.embeddings.map((embedding, index) => new Document({
+      pageContent: embeddingsData.content[index], // Access corresponding content chunk
+      metadata: { spaceId: embeddingsData.spaceId }
     }));
 
     // Create a vector store and add the documents to it
@@ -195,22 +201,22 @@ app.post('/api/chat', async (req, res) => {
     // Use similarity search on the vectorStore to find the top 3 similar documents
     let results;
     try {
-      results = await vectorStore.similaritySearch(String(prompt), 3);
+      results = await vectorStore.similaritySearch(prompt, 3);
       console.log("Similarity search results:", results);
     } catch (error) {
       console.error("Error during similarity search:", error);
       return res.status(500).json({ error: "Error during similarity search", details: error.message });
     }
 
-    // Construct context from top matching documents
-    const context = results.map(result => `Document: ${result.pageContent}`).join('\n\n');
+    // Construct context from top matching documents' content
+    const context = results.map(result => `Content: ${result.pageContent}`).join('\n\n');
     console.log("Constructed context for OpenAI:", context);
 
     // Send the query with context to OpenAI
     const response = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages: [
-        { role: 'system', content: 'You are a helpful assistant that can answer questions about documents.' },
+        { role: 'system', content: 'You are a helpful assistant that can answer questions based on documents.' },
         { role: 'user', content: `Context:\n${context}\n\nQuestion: ${prompt}` },
       ],
     });
@@ -222,24 +228,6 @@ app.post('/api/chat', async (req, res) => {
     res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 // POST route for user registration
@@ -662,6 +650,7 @@ app.delete('/api/documents/:id', async (req, res) => {
   }
 });
 
+
 app.post('/api/upload-pdf', upload.single('pdf'), async (req, res) => {
   try {
     console.log("Received PDF upload request");
@@ -684,7 +673,7 @@ app.post('/api/upload-pdf', upload.single('pdf'), async (req, res) => {
     console.log("Document successfully split into chunks:", documentChunks.length);
 
     // Initialize OpenAI Embeddings and ensure valid chunks
-    const embeddings = new OpenAIEmbeddings({ apiKey: process.env.OPENAI_API_KEY });
+    const embeddingsClient = new OpenAIEmbeddings({ apiKey: process.env.OPENAI_API_KEY });
     const validChunks = documentChunks.filter(chunk => chunk.pageContent?.trim());
 
     if (validChunks.length === 0) {
@@ -693,25 +682,43 @@ app.post('/api/upload-pdf', upload.single('pdf'), async (req, res) => {
 
     console.log("Filtered and prepared valid document chunks:", validChunks.length);
 
-    // Generate embeddings for valid chunks
-    const hnswIndex = await HNSWLib.fromDocuments(validChunks, embeddings);
+    // Generate embeddings for each chunk and store them in arrays
+    const embeddingsArray = [];
+    const contentArray = [];
 
-    // Save embeddings index and document metadata to database
+    for (const chunk of validChunks) {
+      const chunkEmbedding = await embeddingsClient.embedDocuments([chunk.pageContent]);
+      embeddingsArray.push(chunkEmbedding[0]);
+      contentArray.push(chunk.pageContent);
+    }
+
+    // Save the document as a single entry in the database
     const newDocument = new Embedding({
       spaceId,
       title,
-      hnswIndex, // Storing the index
+      embeddings: embeddingsArray,
+      content: contentArray,
     });
     await newDocument.save();
     fs.unlinkSync(req.file.path);
 
     console.log("Document successfully saved to database:", newDocument._id);
-    res.status(200).json(newDocument);
+    res.status(200).json({
+      message: 'Document uploaded and processed successfully.',
+      documentId: newDocument._id,
+      title,
+      spaceId,
+      chunksSaved: validChunks.length,
+    });
   } catch (error) {
     console.error('Error processing the PDF:', error);
     res.status(500).json({ message: 'Server error', details: error.message });
   }
 });
+
+
+
+
 
 
 

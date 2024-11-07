@@ -18,6 +18,7 @@
     "@langchain/textsplitters": "^0.1.0",
     "axios": "^1.7.7",
     "cors": "^2.8.5",
+    "crypto": "^1.0.1",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
     "hnswlib-node": "^3.0.0",
