@@ -4,22 +4,20 @@ import mongoose from 'mongoose';
 import OpenAI from 'openai';
 import fs from 'fs';
 import multer from 'multer';
-import fetch from 'node-fetch';
 import { OpenAIEmbeddings } from '@langchain/openai';
-import { HNSWLib } from '@langchain/community/vectorstores/hnswlib';
 import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
 import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
 import { MemoryVectorStore } from "langchain/vectorstores/memory";
-import { RunnableSequence, RunnablePassthrough } from "@langchain/core/runnables";
 import { Document } from "langchain/document";
-import crypto from 'crypto';
-
+import Chat from "./models/chat.js";
+import Embedding from "./models/embedding.js";
+import Space from "./models/space.js";
+import User from "./models/user.js";
 import * as dotenv from 'dotenv';
-
 dotenv.config();
 
 const app = express();
-const port = 3009; // Define your port
+const port = 3009;
 
 // Configure file upload using multer
 const upload = multer({ dest: 'uploads/' });
@@ -33,107 +31,10 @@ mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected'))
   .catch((error) => console.error('MongoDB connection error:', error));
 
-// Define User model
-const userSchema = new mongoose.Schema({
-  firebaseUid: {
-    type: String,
-    required: true,
-    unique: true
-  },
-  firstName: {
-    type: String,
-    required: true
-  },
-  lastName: {
-    type: String,
-    required: true
-  },
-  email: {
-    type: String,
-    required: true,
-    unique: true
-  },
-  role: {
-    type: String,
-    enum: ['student', 'ta', 'professor'],
-    required: true
-  },
-}, { timestamps: true });
-
-// Define Space Schema
-const spaceSchema = new mongoose.Schema({
-  firebaseUid: {
-    type: String,
-    required: true,
-  },
-  spaceId: {
-    type: String,
-    required: true,
-    unique: true,
-  },
-  spaceName: {
-    type: String,
-    required: true,
-  },
-  users: {
-    type: [String], // Array of firebaseUid strings
-    required: true,
-    default: [], // Initialize with an empty array
-  },
-}, {
-  timestamps: true,
+// Initialize OpenAI API client
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
 });
-
-// Define Chat Schema
-const chatSchema = new mongoose.Schema({
-  firebaseUid: {
-    type: String,
-    required: true,
-  },
-  spaceId: {
-    type: String,
-    required: true,
-  },
-  chatId: {
-    type: String,
-    required: true,
-    unique: true,
-  },
-  chatName: {
-    type: String,
-    required: true,
-  },
-}, {
-  timestamps: true,
-});
-
-const embeddingSchema = new mongoose.Schema({
-  spaceId: {
-    type: String,
-    required: true,
-  },
-  title: {
-    type: String,
-    required: true,
-  },
-  embeddings: {
-    type: [[Number]], // 2D array where each sub-array represents the embeddings for a chunk
-    required: true,
-  },
-  content: {
-    type: [String], // Array of content chunks, aligned with embeddings
-    required: true,
-  },
-}, {
-  timestamps: true,
-});
-
-
-// Initiliaze DB Schemas
-const User = mongoose.model('User', userSchema);
-const Chat = mongoose.model('Chat', chatSchema);
-const Space = mongoose.model('Space', spaceSchema);
-const Embedding = mongoose.model('Embedding', embeddingSchema);
 
 // Function to create the default space
 const createDefaultSpace = async (firebaseUid) => {
@@ -160,12 +61,6 @@ const createDefaultSpace = async (firebaseUid) => {
 };
 
 
-// Initialize OpenAI API client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-
 app.post('/api/chat', async (req, res) => {
   try {
     const { prompt, spaceId } = req.body;
@@ -179,10 +74,49 @@ app.post('/api/chat', async (req, res) => {
 
     // Fetch stored embeddings and content for the specified spaceId
     const embeddingsData = await Embedding.findOne({ spaceId });
+
+    // If no embeddings data or no content, proceed with general question
     if (!embeddingsData || embeddingsData.embeddings.length === 0) {
-      console.error("No embeddings found for spaceId:", spaceId);
-      return res.status(404).json({ error: "No embeddings found for the specified space" });
+      console.log("No embeddings found for space; proceeding with general question.");
+
+      // Respond directly to OpenAI without document context
+      const response = await openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant that can answer questions based on documents or provide general assistance.' },
+          { role: 'user', content: prompt },
+        ],
+      });
+
+      // Working on a better format
+      /*     const response = await openai.chat.completions.create({
+            model: 'gpt-3.5-turbo',
+            messages: [
+              { 
+                role: 'system', 
+                content: 'You are a helpful assistant that can answer questions based on documents or provide general assistance and provide answers in a clear and structured format, with line breaks, bullet points, and numbered lists where appropriate. Use headings and organize information for easy readability.' 
+              },
+              { 
+                role: 'user', 
+                content: context 
+                  ? `Please answer the question in a structured format with sections, bullet points, and line breaks as needed:
+                  
+                  **Context**:
+                  ${context}
+                  
+                  **Question**:
+                  ${prompt}`
+                  : `Please answer the question clearly, using bullet points or line breaks as needed:
+                  
+                  ${prompt}`
+              },
+            ],
+          }); */
+
+      const aiResponse = response.choices[0].message.content || "No response from AI";
+      return res.json({ message: aiResponse });
     }
+
     console.log("Fetched embeddings for space:", embeddingsData.embeddings.length);
 
     // Initialize OpenAI embeddings client
@@ -233,32 +167,6 @@ app.post('/api/chat', async (req, res) => {
       ],
     });
 
-    // Working on a better format
-    /*     const response = await openai.chat.completions.create({
-          model: 'gpt-3.5-turbo',
-          messages: [
-            { 
-              role: 'system', 
-              content: 'You are a helpful assistant that can answer questions based on documents or provide general assistance and provide answers in a clear and structured format, with line breaks, bullet points, and numbered lists where appropriate. Use headings and organize information for easy readability.' 
-            },
-            { 
-              role: 'user', 
-              content: context 
-                ? `Please answer the question in a structured format with sections, bullet points, and line breaks as needed:
-                
-                **Context**:
-                ${context}
-                
-                **Question**:
-                ${prompt}`
-                : `Please answer the question clearly, using bullet points or line breaks as needed:
-                
-                ${prompt}`
-            },
-          ],
-        }); */
-
-
     const aiResponse = response.choices[0].message.content || "No response from AI";
     res.json({ message: aiResponse });
   } catch (error) {
@@ -266,7 +174,6 @@ app.post('/api/chat', async (req, res) => {
     res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
-
 
 
 // POST route for user registration
@@ -440,32 +347,7 @@ app.put('/api/spaces/:spaceId', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
-/* // PUT route to add users to a space
-app.put('/api/spaces/:spaceId/users', async (req, res) => {
-  try {
-    const { spaceId } = req.params;
-    const { users } = req.body;
 
-    if (!Array.isArray(users) || users.length === 0) {
-      return res.status(400).json({ message: 'Invalid or empty users array' });
-    }
-
-    const space = await Space.findOneAndUpdate(
-      { spaceId },
-      { $addToSet: { users: { $each: users } } }, // Use $addToSet to add users without duplicates
-      { new: true }
-    );
-
-    if (!space) {
-      return res.status(404).json({ message: 'Space not found' });
-    }
-
-    res.status(200).json(space);
-  } catch (error) {
-    console.error('Error adding users to space:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-}); */
 app.put('/api/spaces/:spaceId/users', async (req, res) => {
   try {
     const { spaceId } = req.params;
@@ -494,9 +376,6 @@ app.put('/api/spaces/:spaceId/users', async (req, res) => {
 });
 
 
-
-
-
 // DELETE route to remove a user from a space
 app.delete('/api/spaces/:spaceId/users/:userId', async (req, res) => {
   try {
@@ -518,8 +397,6 @@ app.delete('/api/spaces/:spaceId/users/:userId', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
-
-
 
 
 // DELETE route to delete a space
@@ -598,7 +475,6 @@ app.delete('/api/chats/:chatId', async (req, res) => {
   }
 });
 
-// Server.js or your main server file
 app.put('/api/chats/:chatId', async (req, res) => {
   try {
     const { chatId } = req.params;
@@ -755,15 +631,7 @@ app.post('/api/upload-pdf', upload.single('pdf'), async (req, res) => {
   }
 });
 
-
-
-
-
-
-
-
-
-// Start the Express server
+// Start the server
 app.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);
 });
