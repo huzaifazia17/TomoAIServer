@@ -631,6 +631,30 @@ app.post('/api/upload-pdf', upload.single('pdf'), async (req, res) => {
   }
 });
 
+// Route to update document visibility
+app.put('/api/documents/:id/visibility', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { visibility } = req.body;
+
+    const updatedDocument = await Embedding.findByIdAndUpdate(
+      id,
+      { visibility },
+      { new: true }
+    );
+
+    if (!updatedDocument) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    res.json(updatedDocument);
+  } catch (error) {
+    console.error('Error updating document visibility:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
 // Start the server
 app.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);

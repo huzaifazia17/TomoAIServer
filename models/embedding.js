@@ -10,12 +10,16 @@ const embeddingSchema = new mongoose.Schema({
         required: true,
     },
     embeddings: {
-        type: [[Number]], // 2D array where each sub-array represents the embeddings for a chunk
+        type: [[Number]], // 2D array for embeddings
         required: true,
     },
     content: {
-        type: [String], // Array of content chunks, aligned with embeddings
+        type: [String], // Array of content chunks
         required: true,
+    },
+    visibility: {
+        type: Boolean,
+        default: true, // By default, documents are visible
     },
 }, {
     timestamps: true,
