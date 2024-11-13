@@ -60,7 +60,137 @@ const createDefaultSpace = async (firebaseUid) => {
   }
 };
 
+/* app.post('/api/chat', async (req, res) => {
+  try {
+    const { prompt, spaceId } = req.body;
 
+    if (!prompt || !spaceId) {
+      return res.status(400).json({ error: "Prompt and spaceId are required" });
+    }
+
+    console.log("Received prompt:", prompt);
+    console.log("Received spaceId:", spaceId);
+
+    // Fetch stored embeddings and content for the specified spaceId
+    const embeddingsData = await Embedding.findOne({ spaceId });
+    if (!embeddingsData || embeddingsData.embeddings.length === 0) {
+      console.error("No embeddings found for spaceId:", spaceId);
+      return res.status(404).json({ error: "No embeddings found for the specified space" });
+    }
+    console.log("Fetched embeddings for space:", embeddingsData.embeddings.length);
+
+    // Initialize OpenAI embeddings client
+    const embeddingsClient = new OpenAIEmbeddings({ apiKey: process.env.OPENAI_API_KEY });
+
+    // Convert stored embeddings and content to LangChain Document format
+    const documents = embeddingsData.embeddings.map((embedding, index) => new Document({
+      pageContent: embeddingsData.content[index], // Access corresponding content chunk
+      metadata: { spaceId: embeddingsData.spaceId }
+    }));
+
+    // Create a vector store and add the documents to it
+    const vectorStore = new MemoryVectorStore(embeddingsClient);
+    await vectorStore.addDocuments(documents);
+
+    // Use similarity search on the vectorStore to find the top 3 similar documents
+    let results;
+    try {
+      results = await vectorStore.similaritySearch(prompt, 3);
+      console.log("Similarity search results:", results);
+    } catch (error) {
+      console.error("Error during similarity search:", error);
+      return res.status(500).json({ error: "Error during similarity search", details: error.message });
+    }
+
+    // Construct context from top matching documents' content
+    const context = results.map(result => `Content: ${result.pageContent}`).join('\n\n');
+    console.log("Constructed context for OpenAI:", context);
+
+    // Send the query with context to OpenAI
+    const response = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        { role: 'system', content: 'You are a helpful assistant that can answer questions based on documents.' },
+        { role: 'user', content: `Context:\n${context}\n\nQuestion: ${prompt}` },
+      ],
+    });
+
+    const aiResponse = response.choices[0].message.content || "No response from AI";
+    res.json({ message: aiResponse });
+  } catch (error) {
+    console.error("Error in AI request:", error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+}); */
+
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { prompt, spaceId } = req.body;
+
+    if (!prompt || !spaceId) {
+      return res.status(400).json({ error: "Prompt and spaceId are required" });
+    }
+
+    console.log("Received prompt:", prompt);
+    console.log("Received spaceId:", spaceId);
+
+    // Fetch all document data for the specified spaceId
+    const embeddingsData = await Embedding.find({ spaceId });
+    if (!embeddingsData || embeddingsData.length === 0) {
+      console.error("No embeddings found for spaceId:", spaceId);
+      return res.status(404).json({ error: "No embeddings found for the specified space" });
+    }
+    console.log("Fetched embeddings for space:", embeddingsData.length);
+
+    // Initialize OpenAI embeddings client
+    const embeddingsClient = new OpenAIEmbeddings({ apiKey: process.env.OPENAI_API_KEY });
+
+    // Convert all embeddings and content to LangChain Document format
+    const documents = embeddingsData.flatMap(data =>
+      data.embeddings.map((embedding, index) => new Document({
+        pageContent: data.content[index],
+        metadata: { spaceId: data.spaceId }
+      }))
+    );
+
+    // Create a vector store with the embeddings
+    const vectorStore = new MemoryVectorStore(embeddingsClient);
+    await vectorStore.addDocuments(documents);
+
+    // Similarity search to find relevant document content
+    let results;
+    try {
+      results = await vectorStore.similaritySearch(prompt, 3);
+      console.log("Similarity search results:", results);
+    } catch (error) {
+      console.error("Error during similarity search:", error);
+      return res.status(500).json({ error: "Error during similarity search", details: error.message });
+    }
+
+    // Construct context from results
+    const context = results.map(result => `Content: ${result.pageContent}`).join('\n\n');
+    console.log("Constructed context for OpenAI:", context);
+
+    // Include formatting instructions in the prompt
+    const response = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        { role: 'system', content: 'You are a helpful assistant that formats answers in a well-organized list, placing each numbered item on a new line.' },
+        { role: 'user', content: context ? `Context:\n${context}\n\nQuestion: ${prompt}` : prompt },
+      ],
+    });
+
+    const aiResponse = response.choices[0].message.content || "No response from AI";
+
+    res.json({ message: aiResponse });
+  } catch (error) {
+    console.error("Error in AI request:", error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+
+/* 
 app.post('/api/chat', async (req, res) => {
   try {
     const { prompt, spaceId } = req.body;
@@ -88,30 +218,6 @@ app.post('/api/chat', async (req, res) => {
         ],
       });
 
-      // Working on a better format
-      /*     const response = await openai.chat.completions.create({
-            model: 'gpt-3.5-turbo',
-            messages: [
-              { 
-                role: 'system', 
-                content: 'You are a helpful assistant that can answer questions based on documents or provide general assistance and provide answers in a clear and structured format, with line breaks, bullet points, and numbered lists where appropriate. Use headings and organize information for easy readability.' 
-              },
-              { 
-                role: 'user', 
-                content: context 
-                  ? `Please answer the question in a structured format with sections, bullet points, and line breaks as needed:
-                  
-                  **Context**:
-                  ${context}
-                  
-                  **Question**:
-                  ${prompt}`
-                  : `Please answer the question clearly, using bullet points or line breaks as needed:
-                  
-                  ${prompt}`
-              },
-            ],
-          }); */
 
       const aiResponse = response.choices[0].message.content || "No response from AI";
       return res.json({ message: aiResponse });
@@ -138,13 +244,13 @@ app.post('/api/chat', async (req, res) => {
     try {
       results = await vectorStore.similaritySearch(prompt, 3);
       console.log("Similarity search results:", results);
-
+      console.log(results.score);
       // Set a threshold score to determine if the prompt matches document content
       //Higher threshold (>0.8) =>This will filter out responses that aren’t very closely matched to the document 
       //content, meaning only very relevant document-related content will be included as context.
       // Lower threshold (<0.5) =>This allows a broader range of content to match the query, 
       // so the AI may use even loosely related document content as context.
-      const thresholdScore = 0.75; // Adjust as needed for relevance
+      const thresholdScore = 1; // Adjust as needed for relevance
       isDocumentBased = results.some(result => result.score >= thresholdScore);
     } catch (error) {
       console.error("Error during similarity search:", error);
@@ -173,7 +279,7 @@ app.post('/api/chat', async (req, res) => {
     console.error("Error in AI request:", error);
     res.status(500).json({ error: 'Internal server error', details: error.message });
   }
-});
+}); */
 
 
 // POST route for user registration
