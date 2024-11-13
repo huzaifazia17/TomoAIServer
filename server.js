@@ -65,12 +65,9 @@ app.post('/api/chat', async (req, res) => {
   try {
     const { prompt, spaceId } = req.body;
 
-    if (!prompt || !spaceId) {
-      return res.status(400).json({ error: "Prompt and spaceId are required" });
+    if (!spaceId) {
+      return res.status(400).json({ error: "spaceId is required" });
     }
-
-    console.log("Received prompt:", prompt);
-    console.log("Received spaceId:", spaceId);
 
     // Fetch all document data for the specified spaceId
     const embeddingsData = await Embedding.find({ spaceId });
@@ -80,10 +77,30 @@ app.post('/api/chat', async (req, res) => {
     }
     console.log("Fetched embeddings for space:", embeddingsData.length);
 
-    // Initialize OpenAI embeddings client
+    // Check if only sample questions are needed (when `prompt` is empty)
+    if (!prompt) {
+      // Generate sample questions based on document content
+      const sampleQuestionsPrompt = embeddingsData.map((data) => data.content).join(' ');
+      const sampleQuestionsResponse = await openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          { role: 'user', content: `Generate 3 unique, concise questions based on the following content without numbering each question:\n${sampleQuestionsPrompt}` },
+        ],
+      });
+
+      const sampleQuestions = sampleQuestionsResponse.choices[0].message.content
+        .split('\n')
+        .map((question) => question.replace(/^\d+\.\s*/, '').trim()) // Remove numbering at the start of each question
+        .filter((line) => line.length > 0) // Keep only non-empty lines
+        .slice(0, 3); // Limit to 3 questions
+
+      return res.json({ sampleQuestions });
+    }
+
+    // Proceed with normal chat response if `prompt` is provided
     const embeddingsClient = new OpenAIEmbeddings({ apiKey: process.env.OPENAI_API_KEY });
 
-    // Convert all embeddings and content to LangChain Document format
+    // Convert embeddings and content to LangChain Document format
     const documents = embeddingsData.flatMap(data =>
       data.embeddings.map((embedding, index) => new Document({
         pageContent: data.content[index],
@@ -109,7 +126,6 @@ app.post('/api/chat', async (req, res) => {
     const context = results.map(result => `Content: ${result.pageContent}`).join('\n\n');
     console.log("Constructed context for OpenAI:", context);
 
-    // Include formatting instructions in the prompt
     const response = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages: [
@@ -118,15 +134,18 @@ app.post('/api/chat', async (req, res) => {
       ],
     });
 
-
     const aiResponse = response.choices[0].message.content || "No response from AI";
-
     res.json({ message: aiResponse });
+
   } catch (error) {
     console.error("Error in AI request:", error);
     res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
+
+
+
+
 
 //Image stuff
 /* app.post('/api/chat', async (req, res) => {
