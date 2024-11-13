@@ -84,7 +84,7 @@ app.post('/api/chat', async (req, res) => {
       const sampleQuestionsResponse = await openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
         messages: [
-          { role: 'user', content: `Generate 3 unique, concise questions based on the following content without numbering each question:\n${sampleQuestionsPrompt}` },
+          { role: 'user', content: `Generate 3 unique, concise questions with less than 12 words based on the following content without numbering each question:\n${sampleQuestionsPrompt}` },
         ],
       });
 
