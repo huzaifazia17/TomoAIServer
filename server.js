@@ -60,68 +60,6 @@ const createDefaultSpace = async (firebaseUid) => {
   }
 };
 
-/* app.post('/api/chat', async (req, res) => {
-  try {
-    const { prompt, spaceId } = req.body;
-
-    if (!prompt || !spaceId) {
-      return res.status(400).json({ error: "Prompt and spaceId are required" });
-    }
-
-    console.log("Received prompt:", prompt);
-    console.log("Received spaceId:", spaceId);
-
-    // Fetch stored embeddings and content for the specified spaceId
-    const embeddingsData = await Embedding.findOne({ spaceId });
-    if (!embeddingsData || embeddingsData.embeddings.length === 0) {
-      console.error("No embeddings found for spaceId:", spaceId);
-      return res.status(404).json({ error: "No embeddings found for the specified space" });
-    }
-    console.log("Fetched embeddings for space:", embeddingsData.embeddings.length);
-
-    // Initialize OpenAI embeddings client
-    const embeddingsClient = new OpenAIEmbeddings({ apiKey: process.env.OPENAI_API_KEY });
-
-    // Convert stored embeddings and content to LangChain Document format
-    const documents = embeddingsData.embeddings.map((embedding, index) => new Document({
-      pageContent: embeddingsData.content[index], // Access corresponding content chunk
-      metadata: { spaceId: embeddingsData.spaceId }
-    }));
-
-    // Create a vector store and add the documents to it
-    const vectorStore = new MemoryVectorStore(embeddingsClient);
-    await vectorStore.addDocuments(documents);
-
-    // Use similarity search on the vectorStore to find the top 3 similar documents
-    let results;
-    try {
-      results = await vectorStore.similaritySearch(prompt, 3);
-      console.log("Similarity search results:", results);
-    } catch (error) {
-      console.error("Error during similarity search:", error);
-      return res.status(500).json({ error: "Error during similarity search", details: error.message });
-    }
-
-    // Construct context from top matching documents' content
-    const context = results.map(result => `Content: ${result.pageContent}`).join('\n\n');
-    console.log("Constructed context for OpenAI:", context);
-
-    // Send the query with context to OpenAI
-    const response = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: [
-        { role: 'system', content: 'You are a helpful assistant that can answer questions based on documents.' },
-        { role: 'user', content: `Context:\n${context}\n\nQuestion: ${prompt}` },
-      ],
-    });
-
-    const aiResponse = response.choices[0].message.content || "No response from AI";
-    res.json({ message: aiResponse });
-  } catch (error) {
-    console.error("Error in AI request:", error);
-    res.status(500).json({ error: 'Internal server error', details: error.message });
-  }
-}); */
 
 app.post('/api/chat', async (req, res) => {
   try {
@@ -175,10 +113,11 @@ app.post('/api/chat', async (req, res) => {
     const response = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages: [
-        { role: 'system', content: 'You are a helpful assistant that formats answers in a well-organized list, placing each numbered item on a new line.' },
+        { role: 'system', content: 'You are a helpful assistant that answers clearly.' },
         { role: 'user', content: context ? `Context:\n${context}\n\nQuestion: ${prompt}` : prompt },
       ],
     });
+
 
     const aiResponse = response.choices[0].message.content || "No response from AI";
 
@@ -189,7 +128,112 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
+//Image stuff
+/* app.post('/api/chat', async (req, res) => {
+  try {
+    const { prompt, spaceId } = req.body;
 
+    if (!prompt || !spaceId) {
+      return res.status(400).json({ error: "Prompt and spaceId are required" });
+    }
+
+    console.log("Received prompt:", prompt);
+    console.log("Received spaceId:", spaceId);
+
+    // Fetch all document data for the specified spaceId
+    const embeddingsData = await Embedding.find({ spaceId });
+    if (!embeddingsData || embeddingsData.length === 0) {
+      console.error("No embeddings found for spaceId:", spaceId);
+      return res.status(404).json({ error: "No embeddings found for the specified space" });
+    }
+
+    console.log("Fetched embeddings for space:", embeddingsData.length);
+
+    // Initialize OpenAI embeddings client
+    const embeddingsClient = new OpenAIEmbeddings({ apiKey: process.env.OPENAI_API_KEY });
+
+    // Convert embeddings to Document format
+    const documents = embeddingsData.flatMap(data =>
+      data.embeddings.map((embedding, index) => new Document({
+        pageContent: data.content[index],
+        metadata: { spaceId: data.spaceId }
+      }))
+    );
+
+    // Create a vector store and add documents to it
+    const vectorStore = new MemoryVectorStore(embeddingsClient);
+    await vectorStore.addDocuments(documents);
+
+    // Similarity search for relevant document content
+    let results;
+    try {
+      results = await vectorStore.similaritySearch(prompt, 3);
+      console.log("Similarity search results:", results);
+    } catch (error) {
+      console.error("Error during similarity search:", error);
+      return res.status(500).json({ error: "Error during similarity search", details: error.message });
+    }
+
+    const context = results.map(result => `Content: ${result.pageContent}`).join('\n\n');
+    console.log("Constructed context for OpenAI:", context);
+
+    // Check if the prompt suggests an image generation request
+    const needsImageGeneration = /create an image|graph|chart|diagram/i.test(prompt);
+
+    if (needsImageGeneration) {
+      try {
+        const imageResponse = await fetch("https://api.openai.com/v1/images/generations", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
+          },
+          body: JSON.stringify({
+            prompt: prompt, // Use the prompt directly
+            n: 1,
+            size: "512x512", // Adjust size as needed
+            response_format: "url"
+          })
+        });
+
+        if (!imageResponse.ok) {
+          throw new Error("Failed to generate image.");
+        }
+
+        const imageData = await imageResponse.json();
+        const imageUrl = imageData.data[0].url;
+
+        console.log("Generated image URL:", imageUrl);
+
+        return res.json({
+          message: "Here's the generated image you requested along with additional context:",
+          imageUrl: imageUrl,
+        });
+      } catch (imageError) {
+        console.error("Error generating image:", imageError);
+        return res.status(500).json({ error: "Error generating image", details: imageError.message });
+      }
+    }
+
+    // Text-only response if no image is requested
+    const response = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        { role: 'system', content: 'You are a helpful assistant that can respond with images if requested, along with text explanations.' },
+        { role: 'user', content: context ? `Context:\n${context}\n\nQuestion: ${prompt}` : prompt },
+      ],
+    });
+
+    const aiResponse = response.choices[0].message.content || "No response from AI";
+    res.json({ message: aiResponse });
+
+  } catch (error) {
+    console.error("Error in AI request:", error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+}); */
+
+//Threshold code
 /* 
 app.post('/api/chat', async (req, res) => {
   try {
