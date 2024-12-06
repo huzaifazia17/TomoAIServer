@@ -5,7 +5,7 @@ Tomo AI is a **Generative AI-based Prompt Web Application** designed to enhance 
 ---
 
 ### 🔗 Client Repository
-Find the server repository [here](https://github.com/huzaifazia17/TomoAIClient).
+Find the client repository [here](https://github.com/huzaifazia17/TomoAIClient).
 
 ---
 
