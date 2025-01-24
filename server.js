@@ -60,6 +60,7 @@ const createDefaultSpace = async (firebaseUid) => {
   }
 };
 
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 app.post('/api/chat', async (req, res) => {
   try {
@@ -123,9 +124,7 @@ app.post('/api/chat', async (req, res) => {
     }
 
     // Construct context from results
-    const context = results.map(result => `Content: ${result.pageContent}`).join('\n\n');
-    console.log("Constructed context for OpenAI:", context);
-
+    const context = results.map((result) => `Content: ${result.pageContent}`).join('\n\n');
     const response = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages: [
@@ -134,17 +133,106 @@ app.post('/api/chat', async (req, res) => {
       ],
     });
 
-    const aiResponse = response.choices[0].message.content || "No response from AI";
-    res.json({ message: aiResponse });
+    const aiResponse = response.choices[0].message.content.split('\n').map((line) => line.trim()).filter((line) => line.length > 0).join('\n') || "No response from AI";
 
+    res.json({
+      message: {
+        contextSummary: context || "No relevant context found.",
+        response: aiResponse,
+      },
+    });
   } catch (error) {
     console.error("Error in AI request:", error);
     res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
+// -------------------------------------------------------------------- HUZZI WORKING CODE BELOW ----------------------------------------------------------------------------
+
+// app.post('/api/chat', async (req, res) => {
+//   try {
+//     const { prompt, spaceId } = req.body;
+
+//     if (!spaceId) {
+//       return res.status(400).json({ error: "spaceId is required" });
+//     }
+
+//     // Fetch all document data for the specified spaceId
+//     const embeddingsData = await Embedding.find({ spaceId });
+//     if (!embeddingsData || embeddingsData.length === 0) {
+//       console.error("No embeddings found for spaceId:", spaceId);
+//       return res.status(404).json({ error: "No embeddings found for the specified space" });
+//     }
+//     console.log("Fetched embeddings for space:", embeddingsData.length);
+
+//     // Check if only sample questions are needed (when `prompt` is empty)
+//     if (!prompt) {
+//       // Generate sample questions based on document content
+//       const sampleQuestionsPrompt = embeddingsData.map((data) => data.content).join(' ');
+//       const sampleQuestionsResponse = await openai.chat.completions.create({
+//         model: 'gpt-3.5-turbo',
+//         messages: [
+//           { role: 'user', content: `Generate 3 unique, concise questions with less than 12 words based on the following content without numbering each question:\n${sampleQuestionsPrompt}` },
+//         ],
+//       });
+
+//       const sampleQuestions = sampleQuestionsResponse.choices[0].message.content
+//         .split('\n')
+//         .map((question) => question.replace(/^\d+\.\s*/, '').trim()) // Remove numbering at the start of each question
+//         .filter((line) => line.length > 0) // Keep only non-empty lines
+//         .slice(0, 3); // Limit to 3 questions
+
+//       return res.json({ sampleQuestions });
+//     }
+
+//     // Proceed with normal chat response if `prompt` is provided
+//     const embeddingsClient = new OpenAIEmbeddings({ apiKey: process.env.OPENAI_API_KEY });
+
+//     // Convert embeddings and content to LangChain Document format
+//     const documents = embeddingsData.flatMap(data =>
+//       data.embeddings.map((embedding, index) => new Document({
+//         pageContent: data.content[index],
+//         metadata: { spaceId: data.spaceId }
+//       }))
+//     );
+
+//     // Create a vector store with the embeddings
+//     const vectorStore = new MemoryVectorStore(embeddingsClient);
+//     await vectorStore.addDocuments(documents);
+
+//     // Similarity search to find relevant document content
+//     let results;
+//     try {
+//       results = await vectorStore.similaritySearch(prompt, 3);
+//       console.log("Similarity search results:", results);
+//     } catch (error) {
+//       console.error("Error during similarity search:", error);
+//       return res.status(500).json({ error: "Error during similarity search", details: error.message });
+//     }
+
+//     // Construct context from results
+//     const context = results.map(result => `Content: ${result.pageContent}`).join('\n\n');
+//     console.log("Constructed context for OpenAI:", context);
+
+//     const response = await openai.chat.completions.create({
+//       model: 'gpt-3.5-turbo',
+//       messages: [
+//         { role: 'system', content: 'You are a helpful assistant that answers clearly.' },
+//         { role: 'user', content: context ? `Context:\n${context}\n\nQuestion: ${prompt}` : prompt },
+//       ],
+//     });
+
+//     const aiResponse = response.choices[0].message.content || "No response from AI";
+//     res.json({ message: aiResponse });
+
+//   } catch (error) {
+//     console.error("Error in AI request:", error);
+//     res.status(500).json({ error: 'Internal server error', details: error.message });
+//   }
+// });
 
 
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 
 //Image stuff
