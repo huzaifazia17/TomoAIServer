@@ -13,6 +13,8 @@ import Chat from "./models/chat.js";
 import Embedding from "./models/embedding.js";
 import Space from "./models/space.js";
 import User from "./models/user.js";
+import ChatPlus from './models/chatPlus.js';
+
 import * as dotenv from 'dotenv';
 dotenv.config();
 
@@ -608,7 +610,7 @@ app.put('/api/spaces/:spaceId', async (req, res) => {
 app.put('/api/spaces/:spaceId/users', async (req, res) => {
   try {
     const { spaceId } = req.params;
-    const { userId } = req.body; // Make sure this is named `userId` to match what you send from the frontend
+    const { userId } = req.body;
 
     if (!userId) {
       return res.status(400).json({ message: 'User ID is required' });
@@ -617,7 +619,7 @@ app.put('/api/spaces/:spaceId/users', async (req, res) => {
     // Update the space to add the userId (firebaseUid) to the users array
     const space = await Space.findOneAndUpdate(
       { spaceId },
-      { $addToSet: { users: userId } }, // $addToSet ensures no duplicates
+      { $addToSet: { users: userId } },
       { new: true }
     );
 
@@ -640,7 +642,7 @@ app.delete('/api/spaces/:spaceId/users/:userId', async (req, res) => {
 
     const space = await Space.findOneAndUpdate(
       { spaceId },
-      { $pull: { users: userId } }, // Remove userId from the array
+      { $pull: { users: userId } }, 
       { new: true }
     );
 
@@ -661,31 +663,31 @@ app.delete('/api/spaces/:spaceId', async (req, res) => {
   try {
     const { spaceId } = req.params;
 
-    // Delete the space from the database
-    const result = await Space.findOneAndDelete({ spaceId });
-    if (!result) {
+    await Chat.deleteMany({ spaceId });
+
+    await ChatPlus.deleteMany({ spaceId });
+
+    const deletedSpace = await Space.findOneAndDelete({ spaceId });
+    if (!deletedSpace) {
       return res.status(404).json({ message: 'Space not found' });
     }
 
-    res.status(200).json({ message: 'Space deleted successfully' });
+    res.status(200).json({ message: 'Space, its chats, and all ChatPlus entries deleted successfully' });
   } catch (error) {
     console.error('Error deleting space:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-
 app.post('/api/chats', async (req, res) => {
   try {
-    const { firebaseUid, spaceId, chatId, chatName } = req.body;
+    const { firebaseUid, spaceId, chatId, chatPlusId, chatName } = req.body;
 
-    // Validate required fields
-    if (!firebaseUid || !spaceId || !chatId || !chatName) {
+    if (!firebaseUid || !spaceId || !chatId || !chatName || !chatPlusId) {
       return res.status(400).json({ message: 'All fields are required' });
     }
 
-    // Create a new chat
-    const newChat = new Chat({ firebaseUid, spaceId, chatId, chatName });
+    const newChat = new Chat({ firebaseUid, spaceId, chatId, chatPlusId, chatName });
     await newChat.save();
 
     res.status(201).json(newChat);
@@ -695,19 +697,30 @@ app.post('/api/chats', async (req, res) => {
   }
 });
 
-
 app.get('/api/chats', async (req, res) => {
   try {
     const { firebaseUid, spaceId } = req.query;
-
     if (!firebaseUid || !spaceId) {
       return res.status(400).json({ message: 'firebaseUid and spaceId are required' });
     }
-
-    // Fetch chats for the space and user
-    const chats = await Chat.find({ firebaseUid, spaceId });
-
-    res.status(200).json({ chats });
+    
+    const chats = await Chat.find({ spaceId });
+    
+    const allowedChats = [];
+    for (const chat of chats) {
+      if (chat.chatPlusId === "NA") {
+        if (chat.firebaseUid === firebaseUid) {
+          allowedChats.push(chat);
+        }
+      } else {
+        const chatPlus = await ChatPlus.findOne({ chatPlusId: chat.chatPlusId });
+        if (chatPlus && chatPlus.users.includes(firebaseUid)) {
+          allowedChats.push(chat);
+        }
+      }
+    }
+    
+    res.status(200).json({ chats: allowedChats });
   } catch (error) {
     console.error('Error fetching chats:', error);
     res.status(500).json({ message: 'Server error' });
@@ -718,14 +731,16 @@ app.delete('/api/chats/:chatId', async (req, res) => {
   try {
     const { chatId } = req.params;
 
-    // Find and delete the chat by chatId
     const deletedChat = await Chat.findOneAndDelete({ chatId });
-
     if (!deletedChat) {
       return res.status(404).json({ message: 'Chat not found' });
     }
 
-    res.status(200).json({ message: 'Chat deleted successfully' });
+    if (deletedChat.chatPlusId && deletedChat.chatPlusId !== "NA") {
+      await ChatPlus.findOneAndDelete({ chatPlusId: deletedChat.chatPlusId });
+    }
+
+    res.status(200).json({ message: 'Chat and its ChatPlus entry deleted successfully' });
   } catch (error) {
     console.error('Error deleting chat:', error);
     res.status(500).json({ message: 'Server error' });
@@ -735,17 +750,21 @@ app.delete('/api/chats/:chatId', async (req, res) => {
 app.put('/api/chats/:chatId', async (req, res) => {
   try {
     const { chatId } = req.params;
-    const { chatName } = req.body;
+    const { chatName, chatPlusId } = req.body;
 
     if (!chatName) {
       return res.status(400).json({ message: 'Chat name is required' });
     }
 
-    // Update the chat in the database
+    const updateData = { chatName };
+    if (chatPlusId) {
+      updateData.chatPlusId = chatPlusId;
+    }
+
     const updatedChat = await Chat.findOneAndUpdate(
-      { chatId }, // Find the chat by its unique chatId
-      { chatName }, // Update the chat name
-      { new: true } // Return the updated document
+      { chatId }, 
+      updateData,
+      { new: true } 
     );
 
     if (!updatedChat) {
@@ -758,7 +777,6 @@ app.put('/api/chats/:chatId', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
-
 
 // Endpoint to generate embeddings and save to the database
 app.post('/api/embeddings', async (req, res) => {
@@ -911,6 +929,140 @@ app.put('/api/documents/:id/visibility', async (req, res) => {
   }
 });
 
+// POST route to create a new ChatPlus entry
+app.post('/api/chatplus', async (req, res) => {
+  try {
+    const { firebaseUid, chatPlusId, spaceId, chatPlusName, users } = req.body;
+    if (!firebaseUid || !chatPlusId || !spaceId || !chatPlusName) {
+      return res.status(400).json({ message: 'Missing required fields' });
+    }
+    const newChatPlus = new ChatPlus({ firebaseUid, chatPlusId, spaceId, chatPlusName, users });
+    await newChatPlus.save();
+    res.status(201).json({ chatPlus: newChatPlus });
+  } catch (error) {
+    console.error('Error creating chatplus:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// GET route to fetch all ChatPlus entries for a specific user
+app.get('/api/chatplus', async (req, res) => {
+  try {
+    const { firebaseUid } = req.query;
+    if (!firebaseUid) {
+      return res.status(400).json({ message: 'firebaseUid is required' });
+    }
+
+    const chatplusEntries = await ChatPlus.find({ users: firebaseUid });
+    res.status(200).json({ chatplus: chatplusEntries });
+  } catch (error) {
+    console.error('Error fetching chatplus entries:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// GET route to fetch a specific ChatPlus entry by chatPlusId
+app.get('/api/chatplus/:chatPlusId', async (req, res) => {
+  try {
+    const { chatPlusId } = req.params;
+    const chatplus = await ChatPlus.findOne({ chatPlusId });
+    if (!chatplus) {
+      return res.status(404).json({ message: 'ChatPlus not found' });
+    }
+    res.status(200).json(chatplus);
+  } catch (error) {
+    console.error('Error fetching chatplus:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// PUT route to update the chatPlusName of a ChatPlus entry
+app.put('/api/chatplus/:chatPlusId', async (req, res) => {
+  try {
+    const { chatPlusId } = req.params;
+    const { chatPlusName } = req.body;
+    if (!chatPlusName) {
+      return res.status(400).json({ message: 'chatPlusName is required' });
+    }
+
+    const updatedChatPlus = await ChatPlus.findOneAndUpdate(
+      { chatPlusId },
+      { chatPlusName },
+      { new: true }
+    );
+
+    if (!updatedChatPlus) {
+      return res.status(404).json({ message: 'ChatPlus not found' });
+    }
+
+    res.status(200).json({ message: 'ChatPlus updated successfully', chatPlus: updatedChatPlus });
+  } catch (error) {
+    console.error('Error updating chatplus:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// PUT route to add a user to a ChatPlus's users array
+app.put('/api/chatplus/:chatPlusId/users', async (req, res) => {
+  try {
+    const { chatPlusId } = req.params;
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ message: 'User ID is required' });
+    }
+
+    const chatplus = await ChatPlus.findOneAndUpdate(
+      { chatPlusId },
+      { $addToSet: { users: userId } }, 
+      { new: true }
+    );
+
+    if (!chatplus) {
+      return res.status(404).json({ message: 'ChatPlus not found' });
+    }
+
+    res.status(200).json(chatplus);
+  } catch (error) {
+    console.error('Error adding user to chatplus:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// DELETE route to remove a user from a ChatPlus's users array
+app.delete('/api/chatplus/:chatPlusId/users/:userId', async (req, res) => {
+  try {
+    const { chatPlusId, userId } = req.params;
+    const chatplus = await ChatPlus.findOneAndUpdate(
+      { chatPlusId },
+      { $pull: { users: userId } },
+      { new: true }
+    );
+
+    if (!chatplus) {
+      return res.status(404).json({ message: 'ChatPlus not found' });
+    }
+
+    res.status(200).json(chatplus);
+  } catch (error) {
+    console.error('Error removing user from chatplus:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// DELETE route to delete a ChatPlus entry
+app.delete('/api/chatplus/:chatPlusId', async (req, res) => {
+  try {
+    const { chatPlusId } = req.params;
+    const deletedChatPlus = await ChatPlus.findOneAndDelete({ chatPlusId });
+    if (!deletedChatPlus) {
+      return res.status(404).json({ message: 'ChatPlus not found' });
+    }
+    res.status(200).json({ message: 'ChatPlus deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting chatplus:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
 // Start the server
 app.listen(port, () => {

@@ -1,29 +1,30 @@
 import mongoose from 'mongoose';
 
-const chatSchema = new mongoose.Schema({
+const chatPlusSchema = new mongoose.Schema({
     firebaseUid: {
         type: String,
         required: true,
+    },
+    chatPlusId: {
+        type: String,
+        required: true,
+        unique: true,
     },
     spaceId: {
         type: String,
         required: true,
     },
-    chatId: {
-        type: String,
-        required: true,
-        unique: true,
-    },
-    chatPlusId: {
+    chatPlusName: {
         type: String,
         required: true,
     },
-    chatName: {
-        type: String,
+    users: {
+        type: [String], 
         required: true,
+        default: [], 
     },
 }, {
     timestamps: true,
 });
 
-export default mongoose.models.chat || mongoose.model('Chat', chatSchema);
+export default mongoose.models.chatPlus || mongoose.model('chatPlus', chatPlusSchema);
