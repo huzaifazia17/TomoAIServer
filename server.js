@@ -548,6 +548,29 @@ app.get('/api/users/:firebaseUid', async (req, res) => {
   }
 });
 
+app.get('/api/users/chatPlus/:firebaseUid', async (req, res) => {
+  try {
+    const { firebaseUid } = req.params;
+    console.log("Fetching user for ChatPlus with firebaseUid:", firebaseUid);
+
+    const user = await User.findOne({ firebaseUid });
+    if (!user) {
+      console.log("User not found with firebaseUid:", firebaseUid);
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    console.log("User found:", user);
+    res.json({ 
+      role: user.role,
+      firstName: user.firstName,
+      lastName: user.lastName
+    });
+  } catch (error) {
+    console.error("Error retrieving user for ChatPlus:", error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // GET route to fetch spaces for a specific user
 app.get('/api/spaces', async (req, res) => {
   try {
@@ -634,6 +657,24 @@ app.put('/api/spaces/:spaceId/users', async (req, res) => {
   }
 });
 
+app.get('/api/spaces/:spaceId/students', async (req, res) => {
+  try {
+    const { spaceId } = req.params;
+    const space = await Space.findOne({ spaceId });
+    if (!space) {
+      return res.status(404).json({ message: 'Space not found' });
+    }
+
+    const students = await User.find({ 
+      firebaseUid: { $in: space.users }, 
+      role: 'student' 
+    });
+    res.status(200).json({ students });
+  } catch (error) {
+    console.error('Error fetching students:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
 // DELETE route to remove a user from a space
 app.delete('/api/spaces/:spaceId/users/:userId', async (req, res) => {
@@ -774,6 +815,21 @@ app.put('/api/chats/:chatId', async (req, res) => {
     res.status(200).json(updatedChat);
   } catch (error) {
     console.error('Error updating chat name:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+app.get('/api/chats/allChatplus', async (req, res) => {
+  try {
+    const { spaceId } = req.query;
+    if (!spaceId) {
+      return res.status(400).json({ message: 'spaceId is required' });
+    }
+
+    const chats = await Chat.find({ spaceId, chatPlusId: { $ne: "NA" } }).lean();
+    res.status(200).json({ chats });
+  } catch (error) {
+    console.error('Error fetching all chatplus chats:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -1060,6 +1116,19 @@ app.delete('/api/chatplus/:chatPlusId', async (req, res) => {
     res.status(200).json({ message: 'ChatPlus deleted successfully' });
   } catch (error) {
     console.error('Error deleting chatplus:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// GET route to fetch all ChatPlus entries for a space
+app.get('/api/chatplus/space/:spaceId', async (req, res) => {
+  try {
+    const { spaceId } = req.params;
+
+    const chatplusEntries = await ChatPlus.find({ spaceId });
+    res.status(200).json({ chatplus: chatplusEntries });
+  } catch (error) {
+    console.error('Error fetching chatplus for space:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
