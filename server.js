@@ -985,6 +985,44 @@ app.put('/api/documents/:id/visibility', async (req, res) => {
   }
 });
 
+app.post('/api/document-summary', async (req, res) => {
+  try {
+    let { documentContent, documentId } = req.body;
+    if (!documentContent) {
+      return res.status(400).json({ error: 'documentContent is required' });
+    }
+    // If documentContent is an array, join it.
+    if (Array.isArray(documentContent)) {
+      documentContent = documentContent.join(" ");
+    } else {
+      documentContent = String(documentContent);
+    }
+
+    const summaryResponse = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are an expert summarizer. Summarize the following document by listing all the main concepts and explaining them concisely. Ensure that the summary is clear, well-structured, and covers the key ideas with brief explanations for each concept.',
+        },
+        { role: 'user', content: documentContent },
+      ],
+    });
+
+    // Check response and extract summary.
+    if (!summaryResponse || !summaryResponse.choices || summaryResponse.choices.length === 0) {
+      throw new Error('Unexpected response from OpenAI API');
+    }
+    const summary = summaryResponse.choices[0].message.content.trim();
+    res.status(200).json({ summary });
+  } catch (error) {
+    console.error('Error generating document summary:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+
 // POST route to create a new ChatPlus entry
 app.post('/api/chatplus', async (req, res) => {
   try {
