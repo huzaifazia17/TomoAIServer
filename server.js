@@ -1022,6 +1022,46 @@ app.post('/api/document-summary', async (req, res) => {
   }
 });
 
+app.post('/api/document-quiz', async (req, res) => {
+  try {
+    let { documentContent, documentId } = req.body;
+    if (!documentContent) {
+      return res.status(400).json({ error: 'documentContent is required' });
+    }
+
+    // If documentContent is an array, join it into a string.
+    if (Array.isArray(documentContent)) {
+      documentContent = documentContent.join(" ");
+    } else {
+      documentContent = String(documentContent);
+    }
+
+    // Call OpenAI API to generate quiz questions
+    const quizResponse = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are an AI assistant that generates multiple-choice quizzes. Based on the document provided, create a quiz with 10 questions (ensure that each question is medium difficulty). Each question must have 4 answer choices (A, B, C, D [MAKE SURE THAT THE ANSWERS MAKE SENSE PER THE QUESTION]), and at the end of the quiz, provide an answer key in the format: "Q1: B, Q2: D, ..."',
+        },
+        { role: 'user', content: documentContent },
+      ],
+    });
+
+    // Check response and extract quiz
+    if (!quizResponse || !quizResponse.choices || quizResponse.choices.length === 0) {
+      throw new Error('Unexpected response from OpenAI API');
+    }
+
+    const quizText = quizResponse.choices[0].message.content.trim();
+
+    res.status(200).json({ quiz: quizText });
+  } catch (error) {
+    console.error('Error generating quiz:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
 
 // POST route to create a new ChatPlus entry
 app.post('/api/chatplus', async (req, res) => {
