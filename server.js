@@ -15,17 +15,22 @@ import Space from "./models/space.js";
 import User from "./models/user.js";
 import ChatPlus from './models/chatPlus.js';
 
+
 import * as dotenv from 'dotenv';
 dotenv.config();
 
 const app = express();
-const port = 3009;
+const port = process.env.PORT || 3009;
 
 // Configure file upload using multer
 const upload = multer({ dest: 'uploads/' });
 
 // Middleware setup
-app.use(cors()); // Enable CORS for frontend-backend communication
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true
+})); 
+// Enable CORS for frontend-backend communication
 app.use(express.json()); // Parse incoming JSON requests
 
 // Connect to MongoDB
