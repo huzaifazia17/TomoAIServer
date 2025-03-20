@@ -532,7 +532,7 @@ app.get('/api/users', async (req, res) => {
 app.get('/api/users/:firebaseUid', async (req, res) => {
   try {
     const { firebaseUid } = req.params;
-    console.log("Fetching user with firebaseUid:", firebaseUid); // Log the firebaseUid being searched
+    console.log("Fetching user with firebaseUid:", firebaseUid); 
 
     const user = await User.findOne({ firebaseUid });
     if (!user) {
@@ -540,10 +540,15 @@ app.get('/api/users/:firebaseUid', async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    console.log("User found:", user); // Log the found user document
-    res.json({ role: user.role });
+    console.log("✅ User found:", user);
+    res.json({
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      role: user.role
+    });
   } catch (error) {
-    console.error("Error retrieving user:", error);
+    console.error("❌ Error retrieving user:", error);
     res.status(500).json({ message: 'Server error' });
   }
 });
